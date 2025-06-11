@@ -1,12 +1,10 @@
 from collections import UserDict
 
-import pytest
-
 import networkx as nx
+import pytest
 from networkx.utils import edges_equal
-
-from .test_graph import BaseAttrGraphTester
-from .test_graph import TestGraph as _TestGraph
+from test_graph import BaseAttrGraphTester
+from test_graph import TestGraph as _TestGraph
 
 
 class BaseMultiGraphTester(BaseAttrGraphTester):
@@ -129,53 +127,25 @@ class BaseMultiGraphTester(BaseAttrGraphTester):
         G.add_edge(1, 2, key="k1", foo="bar")
         G.add_edge(1, 2, key="k2", foo="baz")
         assert isinstance(G.get_edge_data(1, 2), G.edge_key_dict_factory)
-        assert all(
-            isinstance(d, G.edge_attr_dict_factory) for u, v, d in G.edges(data=True)
-        )
-        assert edges_equal(
-            G.edges(keys=True, data=True),
-            [(1, 2, "k1", {"foo": "bar"}), (1, 2, "k2", {"foo": "baz"})],
-        )
-        assert edges_equal(
-            G.edges(keys=True, data="foo"), [(1, 2, "k1", "bar"), (1, 2, "k2", "baz")]
-        )
+        assert all(isinstance(d, G.edge_attr_dict_factory) for u, v, d in G.edges(data=True))
+        assert edges_equal(G.edges(keys=True, data=True), [(1, 2, "k1", {"foo": "bar"}), (1, 2, "k2", {"foo": "baz"})])
+        assert edges_equal(G.edges(keys=True, data="foo"), [(1, 2, "k1", "bar"), (1, 2, "k2", "baz")])
 
     def test_edge_attr4(self):
         G = self.Graph()
         G.add_edge(1, 2, key=0, data=7, spam="bar", bar="foo")
-        assert edges_equal(
-            G.edges(data=True), [(1, 2, {"data": 7, "spam": "bar", "bar": "foo"})]
-        )
+        assert edges_equal(G.edges(data=True), [(1, 2, {"data": 7, "spam": "bar", "bar": "foo"})])
         G[1][2][0]["data"] = 10  # OK to set data like this
-        assert edges_equal(
-            G.edges(data=True), [(1, 2, {"data": 10, "spam": "bar", "bar": "foo"})]
-        )
+        assert edges_equal(G.edges(data=True), [(1, 2, {"data": 10, "spam": "bar", "bar": "foo"})])
 
         G.adj[1][2][0]["data"] = 20
-        assert edges_equal(
-            G.edges(data=True), [(1, 2, {"data": 20, "spam": "bar", "bar": "foo"})]
-        )
+        assert edges_equal(G.edges(data=True), [(1, 2, {"data": 20, "spam": "bar", "bar": "foo"})])
         G.edges[1, 2, 0]["data"] = 21  # another spelling, "edge"
-        assert edges_equal(
-            G.edges(data=True), [(1, 2, {"data": 21, "spam": "bar", "bar": "foo"})]
-        )
+        assert edges_equal(G.edges(data=True), [(1, 2, {"data": 21, "spam": "bar", "bar": "foo"})])
         G.adj[1][2][0]["listdata"] = [20, 200]
         G.adj[1][2][0]["weight"] = 20
         assert edges_equal(
-            G.edges(data=True),
-            [
-                (
-                    1,
-                    2,
-                    {
-                        "data": 21,
-                        "spam": "bar",
-                        "bar": "foo",
-                        "listdata": [20, 200],
-                        "weight": 20,
-                    },
-                )
-            ],
+            G.edges(data=True), [(1, 2, {"data": 21, "spam": "bar", "bar": "foo", "listdata": [20, 200], "weight": 20})]
         )
 
 
@@ -255,11 +225,7 @@ class TestMultiGraph(BaseMultiGraphTester, _TestGraph):
         G = nx.to_networkx_graph(dod, create_using=self.Graph, multigraph_input=mgi)
         assert list(G.edges(keys=True, data=True)) == edges
 
-    mgi_none_cases = [
-        (dodod1, multiple_edge),
-        (dodod2, single_edge2),
-        (dodod3, single_edge3),
-    ]
+    mgi_none_cases = [(dodod1, multiple_edge), (dodod2, single_edge2), (dodod3, single_edge3)]
 
     @pytest.mark.parametrize("dod, edges", mgi_none_cases)
     def test_non_multigraph_input_mgi_none(self, dod, edges):
@@ -273,13 +239,7 @@ class TestMultiGraph(BaseMultiGraphTester, _TestGraph):
     def test_non_multigraph_input_raise(self, dod):
         # cases where NetworkXError is raised
         pytest.raises(nx.NetworkXError, self.Graph, dod, multigraph_input=True)
-        pytest.raises(
-            nx.NetworkXError,
-            nx.to_networkx_graph,
-            dod,
-            create_using=self.Graph,
-            multigraph_input=True,
-        )
+        pytest.raises(nx.NetworkXError, nx.to_networkx_graph, dod, create_using=self.Graph, multigraph_input=True)
 
     def test_getitem(self):
         G = self.K3
@@ -320,22 +280,14 @@ class TestMultiGraph(BaseMultiGraphTester, _TestGraph):
     def test_add_edges_from(self):
         G = self.Graph()
         G.add_edges_from([(0, 1), (0, 1, {"weight": 3})])
-        assert G.adj == {
-            0: {1: {0: {}, 1: {"weight": 3}}},
-            1: {0: {0: {}, 1: {"weight": 3}}},
-        }
+        assert G.adj == {0: {1: {0: {}, 1: {"weight": 3}}}, 1: {0: {0: {}, 1: {"weight": 3}}}}
         G.add_edges_from([(0, 1), (0, 1, {"weight": 3})], weight=2)
         assert G.adj == {
             0: {1: {0: {}, 1: {"weight": 3}, 2: {"weight": 2}, 3: {"weight": 3}}},
             1: {0: {0: {}, 1: {"weight": 3}, 2: {"weight": 2}, 3: {"weight": 3}}},
         }
         G = self.Graph()
-        edges = [
-            (0, 1, {"weight": 3}),
-            (0, 1, (("weight", 2),)),
-            (0, 1, 5),
-            (0, 1, "s"),
-        ]
+        edges = [(0, 1, {"weight": 3}), (0, 1, (("weight", 2),)), (0, 1, 5), (0, 1, "s")]
         G.add_edges_from(edges)
         keydict = {0: {"weight": 3}, 1: {"weight": 2}, 5: {}, "s": {}}
         assert G._adj == {0: {1: keydict}, 1: {0: keydict}}
@@ -394,11 +346,7 @@ class TestMultiGraph(BaseMultiGraphTester, _TestGraph):
         G = self.K3
         G.add_edge(0, 1, key="parallel edge")
         G.remove_edge(0, 1, key="parallel edge")
-        assert G.adj == {
-            0: {1: {0: {}}, 2: {0: {}}},
-            1: {0: {0: {}}, 2: {0: {}}},
-            2: {0: {0: {}}, 1: {0: {}}},
-        }
+        assert G.adj == {0: {1: {0: {}}, 2: {0: {}}}, 1: {0: {0: {}}, 2: {0: {}}}, 2: {0: {0: {}}, 1: {0: {}}}}
         G.remove_edge(0, 1)
         kd = {0: {}}
         assert G.adj == {0: {2: kd}, 1: {2: kd}, 2: {0: kd, 1: kd}}
@@ -429,13 +377,11 @@ class TestEdgeSubgraph:
 
     def test_correct_nodes(self):
         """Tests that the subgraph has the correct nodes."""
-        assert [0, 1, 3, 4] == sorted(self.H.nodes())
+        assert sorted(self.H.nodes()) == [0, 1, 3, 4]
 
     def test_correct_edges(self):
         """Tests that the subgraph has the correct edges."""
-        assert [(0, 1, 0, "edge010"), (3, 4, 1, "edge341")] == sorted(
-            self.H.edges(keys=True, data="name")
-        )
+        assert sorted(self.H.edges(keys=True, data="name")) == [(0, 1, 0, "edge010"), (3, 4, 1, "edge341")]
 
     def test_add_node(self):
         """Tests that adding a node to the original graph does not
@@ -443,7 +389,7 @@ class TestEdgeSubgraph:
 
         """
         self.G.add_node(5)
-        assert [0, 1, 3, 4] == sorted(self.H.nodes())
+        assert sorted(self.H.nodes()) == [0, 1, 3, 4]
 
     def test_remove_node(self):
         """Tests that removing a node in the original graph does
@@ -451,7 +397,7 @@ class TestEdgeSubgraph:
 
         """
         self.G.remove_node(0)
-        assert [1, 3, 4] == sorted(self.H.nodes())
+        assert sorted(self.H.nodes()) == [1, 3, 4]
 
     def test_node_attr_dict(self):
         """Tests that the node attribute dictionary of the two graphs is
