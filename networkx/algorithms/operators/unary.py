@@ -73,5 +73,15 @@ def reverse(G, copy=True):
     """
     if not G.is_directed():
         raise nx.NetworkXError("Cannot reverse an undirected graph.")
-    else:
-        return G.reverse(copy=copy)
+    if not copy:
+        return G.reverse(copy=False)
+    # Fast manual implementation for copy=True
+    H = G.fresh_copy()
+    H.add_nodes_from(G.nodes.items())
+    H.add_edges_from(
+        (v, u, d.copy()) if hasattr(d, "copy") else (v, u, dict(d))
+        for u, nbrs in G.adj.items()
+        for v, d in nbrs.items()
+    )
+    H.graph.update(G.graph)
+    return H
