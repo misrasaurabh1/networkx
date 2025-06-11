@@ -369,15 +369,24 @@ class Graph:
         {'day': 'Friday'}
 
         """
-        self.graph = self.graph_attr_dict_factory()  # dictionary for graph attributes
-        self._node = self.node_dict_factory()  # empty node attribute dict
-        self._adj = self.adjlist_outer_dict_factory()  # empty adjacency dict
+        # Assign class-level factories to locals for slightly faster lookup
+        node_dict_factory = self.node_dict_factory
+        graph_attr_dict_factory = self.graph_attr_dict_factory
+        adjlist_outer_dict_factory = self.adjlist_outer_dict_factory
+
+        self.graph = graph_attr_dict_factory()
+        self._node = node_dict_factory()
+        self._adj = adjlist_outer_dict_factory()
         self.__networkx_cache__ = {}
-        # attempt to load graph with data
+
+        # Only call convert if actually requested
         if incoming_graph_data is not None:
+            # Slightly faster to access module-level than via object attribute
             convert.to_networkx_graph(incoming_graph_data, create_using=self)
-        # load graph attributes (must be after convert)
-        self.graph.update(attr)
+
+        # Merge in any graph attributes after structure has loaded
+        if attr:  # skip update if no attributes to set
+            self.graph.update(attr)
 
     @cached_property
     def adj(self):
