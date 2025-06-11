@@ -65,27 +65,48 @@ def not_implemented_for(*graph_types):
        def sp_np_function(G):
            pass
     """
-    if ("directed" in graph_types) and ("undirected" in graph_types):
+    allowed_types = ("directed", "undirected", "multigraph", "graph")
+    # Use tuple for O(1) membership check
+    for typ in graph_types:
+        if typ not in allowed_types:
+            raise KeyError(
+                "use one or more of directed, undirected, multigraph, graph.  "
+                f"You used {graph_types}"
+            )
+    if "directed" in graph_types and "undirected" in graph_types:
         raise ValueError("Function not implemented on directed AND undirected graphs?")
-    if ("multigraph" in graph_types) and ("graph" in graph_types):
+    if "multigraph" in graph_types and "graph" in graph_types:
         raise ValueError("Function not implemented on graph AND multigraphs?")
-    if not set(graph_types) < {"directed", "undirected", "multigraph", "graph"}:
-        raise KeyError(
-            "use one or more of directed, undirected, multigraph, graph.  "
-            f"You used {graph_types}"
-        )
 
-    # 3-way logic: True if "directed" input, False if "undirected" input, else None
-    dval = ("directed" in graph_types) or "undirected" not in graph_types and None
-    mval = ("multigraph" in graph_types) or "graph" not in graph_types and None
+    # Precompute values to avoid repeated computation
+    has_directed = "directed" in graph_types
+    has_undirected = "undirected" in graph_types
+    has_multigraph = "multigraph" in graph_types
+    has_graph = "graph" in graph_types
+
+    if has_directed:
+        dval = True
+    elif has_undirected:
+        dval = False
+    else:
+        dval = None
+
+    if has_multigraph:
+        mval = True
+    elif has_graph:
+        mval = False
+    else:
+        mval = None
+
     errmsg = f"not implemented for {' '.join(graph_types)} type"
 
     def _not_implemented_for(g):
-        if (mval is None or mval == g.is_multigraph()) and (
-            dval is None or dval == g.is_directed()
-        ):
-            raise nx.NetworkXNotImplemented(errmsg)
-
+        g_is_multi = g.is_multigraph()
+        g_is_dir = g.is_directed()
+        # Avoid chained expressions for speed and clarity
+        if mval is None or mval == g_is_multi:
+            if dval is None or dval == g_is_dir:
+                raise nx.NetworkXNotImplemented(errmsg)
         return g
 
     return argmap(_not_implemented_for, 0)
