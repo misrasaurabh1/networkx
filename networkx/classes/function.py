@@ -6,6 +6,8 @@ from itertools import chain
 import networkx as nx
 from networkx.utils import not_implemented_for, pairwise
 
+"""Functional interface to graph methods and assorted utilities."""
+
 __all__ = [
     "nodes",
     "edges",
@@ -1349,7 +1351,19 @@ def number_of_selfloops(G):
     >>> nx.number_of_selfloops(G)
     1
     """
-    return sum(1 for _ in nx.selfloop_edges(G))
+    _is_multigraph = G.is_multigraph()
+    _adj = G._adj
+    count = 0
+    if _is_multigraph:
+        for n, nbrs in _adj.items():
+            nbrn = nbrs.get(n)
+            if nbrn:
+                count += len(nbrn)
+    else:
+        for n, nbrs in _adj.items():
+            if n in nbrs:
+                count += 1
+    return count
 
 
 def is_path(G, path):
