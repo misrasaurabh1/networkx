@@ -467,7 +467,7 @@ def transitivity(G):
 
 @nx._dispatchable
 def square_clustering(G, nodes=None):
-    r"""Compute the squares clustering coefficient for nodes.
+    """Compute the squares clustering coefficient for nodes.
 
     For each node return the fraction of possible squares that exist at
     the node [1]_
@@ -527,65 +527,68 @@ def square_clustering(G, nodes=None):
     else:
         node_iter = G.nbunch_iter(nodes)
     clustering = {}
+
     _G_adj = G._adj
 
-    class GAdj(dict):
-        """Calculate (and cache) node neighbor sets excluding self-loops."""
+    # Precompute neighbor sets (excluding self-loops) for all relevant nodes.
+    neighbor_cache = {}
 
-        def __missing__(self, v):
-            v_neighbors = self[v] = set(_G_adj[v])
-            v_neighbors.discard(v)  # Ignore self-loops
-            return v_neighbors
+    def get_neighbors(n):
+        if n not in neighbor_cache:
+            s = set(_G_adj[n])
+            s.discard(n)
+            neighbor_cache[n] = s
+        return neighbor_cache[n]
 
-    G_adj = GAdj()  # Values are sets of neighbors (no self-loops)
+    # Precompute once for all necessary nodes (avoiding repeated set construction)
+    nodes_to_process = set(G) if nodes is None else set(G.nbunch_iter(nodes))
+    for v in nodes_to_process:
+        get_neighbors(v)
+        for u in _G_adj[v]:
+            get_neighbors(u)  # might add more nodes to neighbor_cache
 
     for v in node_iter:
-        v_neighbors = G_adj[v]
-        v_degrees_m1 = len(v_neighbors) - 1  # degrees[v] - 1 (used below)
-        if v_degrees_m1 <= 0:
-            # Can't form a square without at least two neighbors
+        v_neighbors = neighbor_cache[v]
+        degree_v = len(v_neighbors)
+        if degree_v < 2:
             clustering[v] = 0
             continue
 
-        # Count squares with nodes u-v-w-x from the current node v.
-        # Terms of the denominator: potential = uw_degrees - uw_count - triangles - squares
-        # uw_degrees: degrees[u] + degrees[w] for each u-w combo
-        uw_degrees = 0
-        # uw_count: 1 for each u and 1 for each w for all combos (degrees * (degrees - 1))
-        uw_count = len(v_neighbors) * v_degrees_m1
-        # triangles: 1 for each edge where u-w or w-u are connected (i.e. triangles)
-        triangles = 0
-        # squares: the number of squares (also the numerator)
+        # Compute numerator and denominator as specified by the formula.
         squares = 0
+        potential = 0
 
-        # Iterate over all neighbors
-        for u in v_neighbors:
-            u_neighbors = G_adj[u]
-            uw_degrees += len(u_neighbors) * v_degrees_m1
-            # P2 from https://arxiv.org/abs/2007.11111
-            p2 = len(u_neighbors & v_neighbors)
-            # triangles is C_3, sigma_4 from https://arxiv.org/abs/2007.11111
-            # This double-counts triangles compared to `triangles` function
-            triangles += p2
-            # squares is C_4, sigma_12 from https://arxiv.org/abs/2007.11111
-            # Include this term, b/c a neighbor u can also be a neighbor of neighbor x
-            squares += p2 * (p2 - 1)  # Will divide by 2 later
+        v_neighbors_list = list(v_neighbors)
+        # Iterate over all unordered pairs of neighbors of v (u, w) with u < w
+        for i in range(degree_v):
+            u = v_neighbors_list[i]
+            u_neighbors = neighbor_cache[u]
+            deg_u = len(u_neighbors)
+            for j in range(i + 1, degree_v):
+                w = v_neighbors_list[j]
+                w_neighbors = neighbor_cache[w]
+                deg_w = len(w_neighbors)
 
-        # And iterate over all neighbors of neighbors.
-        # These nodes x may be the corners opposite v in squares u-v-w-x.
-        two_hop_neighbors = set.union(*(G_adj[u] for u in v_neighbors))
-        two_hop_neighbors -= v_neighbors  # Neighbors already counted above
-        two_hop_neighbors.discard(v)
-        for x in two_hop_neighbors:
-            p2 = len(v_neighbors & G_adj[x])
-            squares += p2 * (p2 - 1)  # Will divide by 2 later
+                # Find common neighbors of u and w other than v
+                # (ie: squares passing through v, between u and w)
+                common = u_neighbors & w_neighbors
+                common.discard(v)
+                q_uw = len(common)
 
-        squares //= 2
-        potential = uw_degrees - uw_count - triangles - squares
+                # theta_uw: 1 if u and w are connected, 0 otherwise
+                theta_uw = 1 if w in u_neighbors else 0
+
+                a_v_uw = (deg_u - (1 + q_uw + theta_uw)) + (
+                    deg_w - (1 + q_uw + theta_uw)
+                )
+                potential += a_v_uw + q_uw
+                squares += q_uw
+
         if potential > 0:
             clustering[v] = squares / potential
         else:
             clustering[v] = 0
+
     if nodes in G:
         # Return the value of the sole entry in the dictionary.
         return clustering[nodes]
