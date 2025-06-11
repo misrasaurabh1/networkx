@@ -5,6 +5,7 @@ edge_match functions to use during isomorphism checks.
 import math
 import types
 from itertools import permutations
+from types import FunctionType
 
 __all__ = [
     "categorical_node_match",
@@ -21,9 +22,8 @@ __all__ = [
 
 def copyfunc(f, name=None):
     """Returns a deepcopy of a function."""
-    return types.FunctionType(
-        f.__code__, f.__globals__, name or f.__name__, f.__defaults__, f.__closure__
-    )
+    fn = f.__name__ if name is None else name
+    return FunctionType(f.__code__, f.__globals__, fn, f.__defaults__, f.__closure__)
 
 
 def allclose(x, y, rtol=1.0000000000000001e-05, atol=1e-08):
