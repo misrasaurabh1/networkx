@@ -450,50 +450,77 @@ def _pagerank_scipy(
        http://dbpubs.stanford.edu:8090/pub/showDoc.Fulltext?lang=en&doc=1999-66&format=pdf
     """
     import numpy as np
-    import scipy as sp
 
     N = len(G)
     if N == 0:
         return {}
 
     nodelist = list(G)
-    A = nx.to_scipy_sparse_array(G, nodelist=nodelist, weight=weight, dtype=float)
-    S = A.sum(axis=1)
-    S[S != 0] = 1.0 / S[S != 0]
-    # TODO: csr_array
-    Q = sp.sparse.csr_array(sp.sparse.spdiags(S.T, 0, *A.shape))
-    A = Q @ A
 
-    # initial vector
+    # Build adjacency in CSR for fast row manipulations/multiplication
+    A = nx.to_scipy_sparse_array(
+        G, nodelist=nodelist, weight=weight, dtype=float, format="csr"
+    )
+
+    # Compute out-degree row-sums (use getnnz if no weights for efficiency, else sum)
+    # S contains row sums
+    S = np.array(A.sum(axis=1)).flatten()
+    # Locate dangling nodes (sums == 0.0) up front
+    is_dangling = np.flatnonzero(S == 0.0)
+
+    # Row-normalize A in-place, safe because we own the input (make copy if not csr)
+    nonzero_rows = S != 0.0
+    # Only divide nonzero rows by S
+    # A.data is a flat data array; to divide each row's nonzero entries by the corresponding row sum
+    row_indices = np.repeat(np.arange(N), np.diff(A.indptr))
+    A.data /= S[row_indices]
+
+    # Initial PageRank vector (as a float64 array)
     if nstart is None:
-        x = np.repeat(1.0 / N, N)
+        x = np.full(N, 1.0 / N)
     else:
-        x = np.array([nstart.get(n, 0) for n in nodelist], dtype=float)
+        x = np.array([nstart.get(n, 0) for n in nodelist], dtype=np.float64)
         x /= x.sum()
 
     # Personalization vector
     if personalization is None:
-        p = np.repeat(1.0 / N, N)
+        p = np.full(N, 1.0 / N)
     else:
-        p = np.array([personalization.get(n, 0) for n in nodelist], dtype=float)
-        if p.sum() == 0:
+        p = np.fromiter(
+            (personalization.get(n, 0) for n in nodelist), dtype=np.float64, count=N
+        )
+        p_sum = p.sum()
+        if p_sum == 0.0:
             raise ZeroDivisionError
-        p /= p.sum()
-    # Dangling nodes
+        p /= p_sum
+
+    # Dangling weight vector
     if dangling is None:
         dangling_weights = p
     else:
-        # Convert the dangling dictionary into an array in nodelist order
-        dangling_weights = np.array([dangling.get(n, 0) for n in nodelist], dtype=float)
-        dangling_weights /= dangling_weights.sum()
-    is_dangling = np.where(S == 0)[0]
+        dangling_weights = np.fromiter(
+            (dangling.get(n, 0) for n in nodelist), dtype=np.float64, count=N
+        )
+        dw_sum = dangling_weights.sum()
+        if dw_sum == 0.0:
+            raise ZeroDivisionError
+        dangling_weights /= dw_sum
 
-    # power iteration: make up to max_iter iterations
+    # Power iteration
     for _ in range(max_iter):
-        xlast = x
-        x = alpha * (x @ A + sum(x[is_dangling]) * dangling_weights) + (1 - alpha) * p
-        # check convergence, l1 norm
-        err = np.absolute(x - xlast).sum()
+        x_last = x
+        # Efficient in-place computation
+        # 1. "x @ A" --> matrix-vector product for ranked transfer
+        # 2. "sum(x[is_dangling]) * dangling_weights": handle all dangling in one sum/dot product
+        # x_new = alpha * (x @ A + sum(x[is_dangling]) * dangling_weights) + (1-alpha) * p
+        # Don't alias x for correct convergence checking
+        x = alpha * (A.T @ x_last)
+        danglesum = alpha * x_last[is_dangling].sum()
+        x += danglesum * dangling_weights
+        x += (1.0 - alpha) * p
+
+        # Check convergence (L1 norm)
+        err = np.abs(x - x_last).sum()
         if err < N * tol:
             return dict(zip(nodelist, map(float, x)))
     raise nx.PowerIterationFailedConvergence(max_iter)
