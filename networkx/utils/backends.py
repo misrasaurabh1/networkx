@@ -104,7 +104,11 @@ _registered_algorithms = {}
 
 # Get default configuration from environment variables at import time
 def _comma_sep_to_list(string):
-    return [x_strip for x in string.strip().split(",") if (x_strip := x.strip())]
+    # Optimize: strip once, use map + filter for better memory & runtime
+    s = string.strip()
+    if not s:
+        return []
+    return list(filter(None, map(str.strip, s.split(","))))
 
 
 def _set_configs_from_environment():
