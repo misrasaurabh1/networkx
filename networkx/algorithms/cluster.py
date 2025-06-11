@@ -99,11 +99,20 @@ def _triangles_and_degree_iter(G, nodes=None):
     if nodes is None:
         nodes_nbrs = G.adj.items()
     else:
-        nodes_nbrs = ((n, G[n]) for n in G.nbunch_iter(nodes))
+        # Cast G[n] once, avoid calling method with each loop
+        nbunch = set(G.nbunch_iter(nodes))
+        nodes_nbrs = ((n, G[n]) for n in nbunch)
 
     for v, v_nbrs in nodes_nbrs:
-        vs = set(v_nbrs) - {v}
-        gen_degree = Counter(len(vs & (set(G[w]) - {w})) for w in vs)
+        # Use frozenset for faster set operations and skip unnecessary -{v}
+        vs = set(v_nbrs)
+        vs.discard(v)
+        # Precompute neighbor sets once for all neighbors
+        neighbor_sets = {w: set(G[w]) for w in vs}
+        for w in vs:
+            neighbor_sets[w].discard(w)
+
+        gen_degree = Counter(len(vs & neighbor_sets[w]) for w in vs)
         ntriangles = sum(k * val for k, val in gen_degree.items())
         yield (v, len(vs), ntriangles, gen_degree)
 
@@ -123,29 +132,37 @@ def _weighted_triangles_and_degree_iter(G, nodes=None, weight="weight"):
     if weight is None or G.number_of_edges() == 0:
         max_weight = 1
     else:
-        max_weight = max(d.get(weight, 1) for u, v, d in G.edges(data=True))
+        # Fastest maximum over generator (avoid named d.get in for loop)
+        max_weight = max(
+            (edata.get(weight, 1) for _, _, edata in G.edges(data=True)), default=1
+        )
+
     if nodes is None:
         nodes_nbrs = G.adj.items()
     else:
-        nodes_nbrs = ((n, G[n]) for n in G.nbunch_iter(nodes))
+        nbunch = set(G.nbunch_iter(nodes))
+        nodes_nbrs = ((n, G[n]) for n in nbunch)
 
     def wt(u, v):
-        return G[u][v].get(weight, 1) / max_weight
+        edge_data = G[u][v]
+        return edge_data.get(weight, 1) / max_weight
 
     for i, nbrs in nodes_nbrs:
-        inbrs = set(nbrs) - {i}
-        weighted_triangles = 0
+        inbrs = set(nbrs)
+        inbrs.discard(i)
+        # Precompute weight array outside inner loop to save lookup
+        weighted_triangles = 0.0
         seen = set()
-        for j in inbrs:
+        inbrs_list = list(inbrs)
+        for idx_j, j in enumerate(inbrs_list):
             seen.add(j)
-            # This avoids counting twice -- we double at the end.
-            jnbrs = set(G[j]) - seen
-            # Only compute the edge weight once, before the inner inner
-            # loop.
+            jnbrs = set(G[j])
+            jnbrs.difference_update(seen)  # Only loop over k: k > j in inbrs set order
             wij = wt(i, j)
-            weighted_triangles += np.cbrt(
-                [(wij * wt(j, k) * wt(k, i)) for k in inbrs & jnbrs]
-            ).sum()
+            common = inbrs & jnbrs
+            wtri = [wij * wt(j, k) * wt(k, i) for k in common]
+            if wtri:
+                weighted_triangles += np.cbrt(wtri).sum()
         yield (i, len(inbrs), 2 * float(weighted_triangles))
 
 
@@ -159,27 +176,37 @@ def _directed_triangles_and_degree_iter(G, nodes=None):
     directed triangles so does not count triangles twice.
 
     """
-    nodes_nbrs = ((n, G._pred[n], G._succ[n]) for n in G.nbunch_iter(nodes))
-
-    for i, preds, succs in nodes_nbrs:
-        ipreds = set(preds) - {i}
-        isuccs = set(succs) - {i}
-
+    G_pred = G._pred
+    G_succ = G._succ
+    nbunch = G.nbunch_iter(nodes)
+    for i in nbunch:
+        preds = G_pred[i]
+        succs = G_succ[i]
+        ipreds = set(preds)
+        ipreds.discard(i)
+        isuccs = set(succs)
+        isuccs.discard(i)
         directed_triangles = 0
-        for j in chain(ipreds, isuccs):
-            jpreds = set(G._pred[j]) - {j}
-            jsuccs = set(G._succ[j]) - {j}
-            directed_triangles += sum(
-                1
-                for k in chain(
-                    (ipreds & jpreds),
-                    (ipreds & jsuccs),
-                    (isuccs & jpreds),
-                    (isuccs & jsuccs),
-                )
+        # Precompute neighbor sets for both in/out per neighbor to avoid redundancy
+        ipreds_list = list(ipreds)
+        isuccs_list = list(isuccs)
+        # Use sets for speed
+        ipreds_set = set(ipreds_list)
+        isuccs_set = set(isuccs_list)
+        # Avoid repeated set construction per neighbor
+        for j in chain(ipreds_list, isuccs_list):
+            jsuccs = set(G_succ[j])
+            jsuccs.discard(j)
+            jpreds = set(G_pred[j])
+            jpreds.discard(j)
+            directed_triangles += (
+                len(ipreds_set & jpreds)
+                + len(ipreds_set & jsuccs)
+                + len(isuccs_set & jpreds)
+                + len(isuccs_set & jsuccs)
             )
-        dtotal = len(ipreds) + len(isuccs)
-        dbidirectional = len(ipreds & isuccs)
+        dtotal = len(ipreds_set) + len(isuccs_set)
+        dbidirectional = len(ipreds_set & isuccs_set)
         yield (i, dtotal, dbidirectional, directed_triangles)
 
 
@@ -198,53 +225,68 @@ def _directed_weighted_triangles_and_degree_iter(G, nodes=None, weight="weight")
     if weight is None or G.number_of_edges() == 0:
         max_weight = 1
     else:
-        max_weight = max(d.get(weight, 1) for u, v, d in G.edges(data=True))
-
-    nodes_nbrs = ((n, G._pred[n], G._succ[n]) for n in G.nbunch_iter(nodes))
+        # Fastest max over generator
+        max_weight = max(
+            (edata.get(weight, 1) for _, _, edata in G.edges(data=True)), default=1
+        )
+    G_pred = G._pred
+    G_succ = G._succ
+    nbunch = G.nbunch_iter(nodes)
 
     def wt(u, v):
-        return G[u][v].get(weight, 1) / max_weight
+        edge_data = G[u][v]
+        return edge_data.get(weight, 1) / max_weight
 
-    for i, preds, succs in nodes_nbrs:
-        ipreds = set(preds) - {i}
-        isuccs = set(succs) - {i}
+    for i in nbunch:
+        preds = G_pred[i]
+        succs = G_succ[i]
+        ipreds = set(preds)
+        ipreds.discard(i)
+        isuccs = set(succs)
+        isuccs.discard(i)
+        triangles = []
 
-        directed_triangles = 0
-        for j in ipreds:
-            jpreds = set(G._pred[j]) - {j}
-            jsuccs = set(G._succ[j]) - {j}
-            directed_triangles += np.cbrt(
-                [(wt(j, i) * wt(k, i) * wt(k, j)) for k in ipreds & jpreds]
-            ).sum()
-            directed_triangles += np.cbrt(
-                [(wt(j, i) * wt(k, i) * wt(j, k)) for k in ipreds & jsuccs]
-            ).sum()
-            directed_triangles += np.cbrt(
-                [(wt(j, i) * wt(i, k) * wt(k, j)) for k in isuccs & jpreds]
-            ).sum()
-            directed_triangles += np.cbrt(
-                [(wt(j, i) * wt(i, k) * wt(j, k)) for k in isuccs & jsuccs]
-            ).sum()
+        ipreds_list = list(ipreds)
+        isuccs_list = list(isuccs)
 
-        for j in isuccs:
-            jpreds = set(G._pred[j]) - {j}
-            jsuccs = set(G._succ[j]) - {j}
-            directed_triangles += np.cbrt(
-                [(wt(i, j) * wt(k, i) * wt(k, j)) for k in ipreds & jpreds]
-            ).sum()
-            directed_triangles += np.cbrt(
-                [(wt(i, j) * wt(k, i) * wt(j, k)) for k in ipreds & jsuccs]
-            ).sum()
-            directed_triangles += np.cbrt(
-                [(wt(i, j) * wt(i, k) * wt(k, j)) for k in isuccs & jpreds]
-            ).sum()
-            directed_triangles += np.cbrt(
-                [(wt(i, j) * wt(i, k) * wt(j, k)) for k in isuccs & jsuccs]
-            ).sum()
+        ipreds_set = set(ipreds_list)
+        isuccs_set = set(isuccs_list)
 
-        dtotal = len(ipreds) + len(isuccs)
-        dbidirectional = len(ipreds & isuccs)
-        yield (i, dtotal, dbidirectional, float(directed_triangles))
+        # Precompute neighbor's neighbor sets just once in this outer loop
+        # (as the number of neighbors is usually much less than |V|).
+        pred_neighbors = {j: (set(G_pred[j]) - {j}) for j in ipreds_set | isuccs_set}
+        succ_neighbors = {j: (set(G_succ[j]) - {j}) for j in ipreds_set | isuccs_set}
+
+        for j in ipreds_list:
+            jpreds = pred_neighbors[j]
+            jsuccs = succ_neighbors[j]
+            # Each inner expression creates a list of weights for k
+            # Only form the list if the intersection is not empty
+            for kset, func in [
+                (ipreds_set & jpreds, lambda k: wt(j, i) * wt(k, i) * wt(k, j)),
+                (ipreds_set & jsuccs, lambda k: wt(j, i) * wt(k, i) * wt(j, k)),
+                (isuccs_set & jpreds, lambda k: wt(j, i) * wt(i, k) * wt(k, j)),
+                (isuccs_set & jsuccs, lambda k: wt(j, i) * wt(i, k) * wt(j, k)),
+            ]:
+                if kset:
+                    triangles.extend(func(k) for k in kset)
+        for j in isuccs_list:
+            jpreds = pred_neighbors[j]
+            jsuccs = succ_neighbors[j]
+            for kset, func in [
+                (ipreds_set & jpreds, lambda k: wt(i, j) * wt(k, i) * wt(k, j)),
+                (ipreds_set & jsuccs, lambda k: wt(i, j) * wt(k, i) * wt(j, k)),
+                (isuccs_set & jpreds, lambda k: wt(i, j) * wt(i, k) * wt(k, j)),
+                (isuccs_set & jsuccs, lambda k: wt(i, j) * wt(i, k) * wt(j, k)),
+            ]:
+                if kset:
+                    triangles.extend(func(k) for k in kset)
+
+        triangle_weight = np.cbrt(triangles).sum() if triangles else 0.0
+
+        dtotal = len(ipreds_set) + len(isuccs_set)
+        dbidirectional = len(ipreds_set & isuccs_set)
+        yield (i, dtotal, dbidirectional, float(triangle_weight))
 
 
 @nx._dispatchable(edge_attrs="weight")
@@ -309,7 +351,7 @@ def average_clustering(G, nodes=None, weight=None, count_zeros=True):
 
 @nx._dispatchable(edge_attrs="weight")
 def clustering(G, nodes=None, weight=None):
-    r"""Compute the clustering coefficient for nodes.
+    """Compute the clustering coefficient for nodes.
 
     For unweighted graphs, the clustering of a node :math:`u`
     is the fraction of possible triangles through that node that exist,
@@ -417,7 +459,6 @@ def clustering(G, nodes=None, weight=None):
             td_iter = _triangles_and_degree_iter(G, nodes)
             clusterc = {v: 0 if t == 0 else t / (d * (d - 1)) for v, d, t, _ in td_iter}
     if nodes in G:
-        # Return the value of the sole entry in the dictionary.
         return clusterc[nodes]
     return clusterc
 
