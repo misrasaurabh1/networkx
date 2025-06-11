@@ -5,6 +5,8 @@ from networkx.utils.decorators import not_implemented_for
 
 from ...utils import arbitrary_element
 
+"""Connected components."""
+
 __all__ = [
     "number_connected_components",
     "connected_components",
@@ -107,7 +109,15 @@ def number_connected_components(G):
     For undirected graphs only.
 
     """
-    return sum(1 for cc in connected_components(G))
+    seen = set()
+    n = len(G)
+    count = 0
+    for v in G:
+        if v not in seen:
+            c = _plain_bfs(G, n, v)
+            seen.update(c)
+            count += 1
+    return count
 
 
 @not_implemented_for("directed")
