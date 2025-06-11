@@ -18,6 +18,18 @@ from networkx.classes import Graph
 from networkx.exception import NetworkXError
 from networkx.utils import nodes_or_number, pairwise
 
+"""Generators for some classic graphs.
+
+The typical graph builder function is called as follows:
+
+>>> G = nx.complete_graph(100)
+
+returning the complete graph on n nodes labeled 0, .., 99
+as a simple graph. Except for `empty_graph`, all the functions
+in this module return a Graph class (i.e. a simple, undirected graph).
+
+"""
+
 __all__ = [
     "balanced_tree",
     "barbell_graph",
@@ -815,16 +827,33 @@ def star_graph(n, create_using=None):
     The graph has n+1 nodes for integer n.
     So star_graph(3) is the same as star_graph(range(4)).
     """
-    n, nodes = n
-    if isinstance(n, numbers.Integral):
-        nodes.append(int(n))  # there should be n+1 nodes
-    G = empty_graph(nodes, create_using)
+    # Return the star graph (center with n outer nodes)
+    nval, nodes = n
+    # For int n, append the last node label
+    if isinstance(nval, numbers.Integral):
+        # Instead of nodes.append, just build node list directly for performance
+        nodes = list(nodes) + [int(nval)]
+    if create_using is None:
+        G = Graph()
+    elif isinstance(create_using, type):
+        G = create_using()
+    else:
+        if not hasattr(create_using, "adj"):
+            raise TypeError(
+                "create_using is not a valid NetworkX graph type or instance"
+            )
+        create_using.clear()
+        G = create_using
+
+    G.add_nodes_from(nodes)
+
     if G.is_directed():
         raise NetworkXError("Directed Graph not supported")
 
     if len(nodes) > 1:
-        hub, *spokes = nodes
-        G.add_edges_from((hub, node) for node in spokes)
+        hub = nodes[0]
+        # Use generator expression for fast edge addition
+        G.add_edges_from((hub, node) for node in nodes[1:])
     return G
 
 
