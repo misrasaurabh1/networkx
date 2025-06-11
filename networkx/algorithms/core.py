@@ -96,29 +96,56 @@ def core_number(G):
         )
         raise nx.NetworkXNotImplemented(msg)
     degrees = dict(G.degree())
-    # Sort nodes by degree.
     nodes = sorted(degrees, key=degrees.get)
+
+    # Bin boundaries: where each degree's group starts (0, i0, i1, ... for increasing degrees)
     bin_boundaries = [0]
     curr_degree = 0
     for i, v in enumerate(nodes):
-        if degrees[v] > curr_degree:
-            bin_boundaries.extend([i] * (degrees[v] - curr_degree))
-            curr_degree = degrees[v]
+        deg = degrees[v]
+        if deg > curr_degree:
+            bin_boundaries.extend([i] * (deg - curr_degree))
+            curr_degree = deg
+
     node_pos = {v: pos for pos, v in enumerate(nodes)}
-    # The initial guess for the core number of a node is its degree.
     core = degrees
-    nbrs = {v: list(nx.all_neighbors(G, v)) for v in G}
+
+    # Pre-define the neighbor iterator per node and avoid allocating extra sets/lists.
+    if G.is_directed():
+
+        def iter_neighbors(v):
+            seen = set()  # To avoid double-counting for bidirectional edges
+            for u in G.predecessors(v):
+                if u != v and u not in seen:
+                    seen.add(u)
+                    yield u
+            for u in G.successors(v):
+                if u != v and u not in seen:
+                    seen.add(u)
+                    yield u
+    else:
+
+        def iter_neighbors(v):
+            for u in G.neighbors(v):
+                if u != v:
+                    yield u
+
+    # Only visit once, do in-place without materializing large neighbor sets.
     for v in nodes:
-        for u in nbrs[v]:
-            if core[u] > core[v]:
-                nbrs[u].remove(v)
+        kv = core[v]
+        for u in iter_neighbors(v):
+            if core[u] > kv:
+                # swap u into the leftmost available bin for its degree
                 pos = node_pos[u]
                 bin_start = bin_boundaries[core[u]]
-                node_pos[u] = bin_start
-                node_pos[nodes[bin_start]] = pos
-                nodes[bin_start], nodes[pos] = nodes[pos], nodes[bin_start]
+                if pos != bin_start:
+                    vp = nodes[bin_start]
+                    # swap positions
+                    nodes[bin_start], nodes[pos] = nodes[pos], nodes[bin_start]
+                    node_pos[u], node_pos[vp] = bin_start, pos
                 bin_boundaries[core[u]] += 1
                 core[u] -= 1
+
     return core
 
 
