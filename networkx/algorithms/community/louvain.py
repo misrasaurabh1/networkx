@@ -351,21 +351,43 @@ def _neighbor_weights(nbrs, node2com):
 
 def _gen_graph(G, partition):
     """Generate a new graph based on the partitions of a given graph"""
-    H = G.__class__()
+
+    # Pre-compute node2com and partition nodes
     node2com = {}
+    partition_nodes = []  # i-th entry is set of all member nodes in i-th community
+    # Batch build node2com mapping and nodes set per community
     for i, part in enumerate(partition):
         nodes = set()
+        append = nodes.update
+        getnodes = G.nodes.__getitem__
         for node in part:
             node2com[node] = i
-            nodes.update(G.nodes[node].get("nodes", {node}))
+            nodeset = getnodes(node).get("nodes")
+            if nodeset is not None:
+                append(nodeset)
+            else:
+                nodes.add(node)
+        partition_nodes.append(nodes)
+
+    # Build H, add nodes in batch
+    H = G.__class__()
+    for i, nodes in enumerate(partition_nodes):
         H.add_node(i, nodes=nodes)
 
+    # Fast multi-edge aggregation
+    edge_weight = {}
+    get_com = node2com.__getitem__
     for node1, node2, wt in G.edges(data=True):
-        wt = wt["weight"]
-        com1 = node2com[node1]
-        com2 = node2com[node2]
-        temp = H.get_edge_data(com1, com2, {"weight": 0})["weight"]
-        H.add_edge(com1, com2, weight=wt + temp)
+        com1 = get_com(node1)
+        com2 = get_com(node2)
+        key = (com1, com2) if com1 <= com2 else (com2, com1)
+        edge_weight[key] = edge_weight.get(key, 0) + wt["weight"]
+
+    # Single pass to add edges with summed weights
+    # Reuse the datadict for symmetry (for undirected)
+    H_add_edge = H.add_edge
+    for (com1, com2), w in edge_weight.items():
+        H_add_edge(com1, com2, weight=w)
     return H
 
 
