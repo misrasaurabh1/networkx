@@ -370,6 +370,7 @@ def _rescale(betweenness, n, *, normalized, directed, k, endpoints, sampled_node
 
     K_source = N if k is None else k
 
+    # Precompute correction and scale factors
     if k is None or endpoints:
         # No sampling adjustment needed
         if normalized:
@@ -378,40 +379,48 @@ def _rescale(betweenness, n, *, normalized, directed, k, endpoints, sampled_node
             scale = 1 / (K_source * (N - 1))
         else:
             # Scale to the full BC
-            if not directed:
-                # The non-normalized BC values are computed the same way for
-                # directed and undirected graphs: shortest paths are computed and
-                # counted for each *ordered* (s, t) pair. Undirected graphs should
-                # only count valid *unordered* node pairs {s, t}; that is, (s, t)
-                # and (t, s) should be counted only once. We correct for this here.
-                correction = 2
-            else:
-                correction = 1
+            correction = 2 if not directed else 1
             scale = N / (K_source * correction)
 
-        if scale != 1:
-            for v in betweenness:
-                betweenness[v] *= scale
+        if not math.isclose(scale, 1.0):
+            # Scale all values in a single update; avoids repeated lookups
+            for v, b in betweenness.items():
+                betweenness[v] = b * scale
         return betweenness
 
-    # Sampling adjustment needed when excluding endpoints when using k. In this
-    # case, we need to handle source nodes differently from non-source nodes,
-    # because source nodes can't include themselves since endpoints are excluded.
-    # Without this, k == n would be a special case that would violate the
-    # assumption that node `v` is not one of the (s, t) node pairs.
+    # Sampling adjustment needed when excluding endpoints and using k
+    # Handle source nodes differently from non-source nodes.
     if normalized:
         # NaN for undefined 0/0; there is no data for source node when k=1
-        scale_source = 1 / ((K_source - 1) * (N - 1)) if K_source > 1 else math.nan
+        if K_source > 1:
+            scale_source = 1 / ((K_source - 1) * (N - 1))
+        else:
+            scale_source = math.nan
         scale_nonsource = 1 / (K_source * (N - 1))
     else:
-        correction = 1 if directed else 2
-        scale_source = N / ((K_source - 1) * correction) if K_source > 1 else math.nan
+        correction = 2 if not directed else 1
+        if K_source > 1:
+            scale_source = N / ((K_source - 1) * correction)
+        else:
+            scale_source = math.nan
         scale_nonsource = N / (K_source * correction)
 
-    sampled_nodes = set(sampled_nodes)
-    for v in betweenness:
-        betweenness[v] *= scale_source if v in sampled_nodes else scale_nonsource
-    return betweenness
+    # Convert sampled_nodes only once to set if it's not already a set
+    if not isinstance(sampled_nodes, set):
+        sampled_nodes_set = set(sampled_nodes)
+    else:
+        sampled_nodes_set = sampled_nodes
+
+    # Use local variable lookups for performance
+    sc_source = scale_source
+    sc_nonsource = scale_nonsource
+    sampled = sampled_nodes_set
+    bset = betweenness
+
+    # Precompute in-sample status for all nodes
+    for v, b in bset.items():
+        bset[v] = b * (sc_source if v in sampled else sc_nonsource)
+    return bset
 
 
 def _rescale_e(betweenness, n, normalized, directed=False, k=None):
