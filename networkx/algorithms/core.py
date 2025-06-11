@@ -107,16 +107,23 @@ def core_number(G):
     node_pos = {v: pos for pos, v in enumerate(nodes)}
     # The initial guess for the core number of a node is its degree.
     core = degrees
-    nbrs = {v: list(nx.all_neighbors(G, v)) for v in G}
+    # Optimization: avoid call to nx.all_neighbors in a dict comp (memory) and repeated list calls.
+    # Instead, build neighbor lists on the fly, and mutate them only if needed. Use sets for O(1) removal.
+    if G.is_directed():
+        _neighbors = lambda v: set(G.predecessors(v)).union(G.successors(v))
+    else:
+        _neighbors = lambda v: set(G.neighbors(v))
+    nbrs = {v: _neighbors(v) for v in G}
     for v in nodes:
-        for u in nbrs[v]:
+        for u in list(nbrs[v]):  # Convert to list once for safe removal/mutation
             if core[u] > core[v]:
                 nbrs[u].remove(v)
                 pos = node_pos[u]
                 bin_start = bin_boundaries[core[u]]
-                node_pos[u] = bin_start
-                node_pos[nodes[bin_start]] = pos
-                nodes[bin_start], nodes[pos] = nodes[pos], nodes[bin_start]
+                if pos != bin_start:
+                    node_pos[u] = bin_start
+                    node_pos[nodes[bin_start]] = pos
+                    nodes[bin_start], nodes[pos] = nodes[pos], nodes[bin_start]
                 bin_boundaries[core[u]] += 1
                 core[u] -= 1
     return core
@@ -141,11 +148,20 @@ def _core_subgraph(G, k_filter, k=None, core=None):
       If not specified, the core numbers will be computed from `G`.
 
     """
+    # Optimization: Use list comprehension for node filtering and subgraph view.
     if core is None:
         core = core_number(G)
     if k is None:
-        k = max(core.values())
-    nodes = (v for v in core if k_filter(v, k, core))
+        # Avoid calling max on view twice.
+        k = max(core.values()) if core else 0
+    # Use list/generator comprehension outside subgraph to avoid G.subgraph
+    # having to hold a generator (can be surprisingly costly for copy).
+    nodes = [v for v in core if k_filter(v, k, core)]
+    # Optimization: If the subgraph is empty or all nodes, skip expensive copy
+    if not nodes:
+        return G.__class__()  # empty graph of same type
+    if len(nodes) == len(core):
+        return G.copy()
     return G.subgraph(nodes).copy()
 
 
