@@ -1,7 +1,7 @@
 """Betweenness centrality measures."""
 
 import math
-from collections import deque
+from collections import defaultdict, deque
 from heapq import heappop, heappush
 from itertools import count
 
@@ -18,7 +18,7 @@ __all__ = ["betweenness_centrality", "edge_betweenness_centrality"]
 def betweenness_centrality(
     G, k=None, normalized=True, weight=None, endpoints=False, seed=None
 ):
-    r"""Compute the shortest-path betweenness centrality for nodes.
+    """Compute the shortest-path betweenness centrality for nodes.
 
     Betweenness centrality of a node $v$ is the sum of the
     fraction of all-pairs shortest paths that pass through $v$
@@ -128,8 +128,8 @@ def betweenness_centrality(
        https://doi.org/10.2307/3033543
     """
     betweenness = dict.fromkeys(G, 0.0)  # b[v]=0 for v in G
-    if k == len(G):
-        # This is done for performance; the result is the same regardless.
+    n = len(G)
+    if k == n:
         k = None
     if k is None:
         nodes = G
@@ -149,7 +149,7 @@ def betweenness_centrality(
     # rescaling
     betweenness = _rescale(
         betweenness,
-        len(G),
+        n,
         normalized=normalized,
         directed=G.is_directed(),
         k=k,
@@ -260,68 +260,73 @@ def edge_betweenness_centrality(G, k=None, normalized=True, weight=None, seed=No
 
 def _single_source_shortest_path_basic(G, s):
     S = []
-    P = {}
-    for v in G:
-        P[v] = []
-    sigma = dict.fromkeys(G, 0.0)  # sigma[v]=0 for v in G
+    P = {v: [] for v in G}
+    sigma = defaultdict(float)
     D = {}
     sigma[s] = 1.0
     D[s] = 0
     Q = deque([s])
-    while Q:  # use BFS to find shortest paths
+    G_adj = G._adj if hasattr(G, "_adj") else G  # For graph class speed
+    while Q:
         v = Q.popleft()
         S.append(v)
         Dv = D[v]
         sigmav = sigma[v]
-        for w in G[v]:
+        Gv = G_adj[v]
+        for w in Gv:
             if w not in D:
                 Q.append(w)
                 D[w] = Dv + 1
-            if D[w] == Dv + 1:  # this is a shortest path, count paths
+            if D[w] == Dv + 1:
                 sigma[w] += sigmav
-                P[w].append(v)  # predecessors
-    return S, P, sigma, D
-
-
-def _single_source_dijkstra_path_basic(G, s, weight):
-    weight = _weight_function(G, weight)
-    # modified from Eppstein
-    S = []
-    P = {}
-    for v in G:
-        P[v] = []
-    sigma = dict.fromkeys(G, 0.0)  # sigma[v]=0 for v in G
-    D = {}
-    sigma[s] = 1.0
-    seen = {s: 0}
-    c = count()
-    Q = []  # use Q as heap with (distance,node id) tuples
-    heappush(Q, (0, next(c), s, s))
-    while Q:
-        (dist, _, pred, v) = heappop(Q)
-        if v in D:
-            continue  # already searched this node.
-        sigma[v] += sigma[pred]  # count paths
-        S.append(v)
-        D[v] = dist
-        for w, edgedata in G[v].items():
-            vw_dist = dist + weight(v, w, edgedata)
-            if w not in D and (w not in seen or vw_dist < seen[w]):
-                seen[w] = vw_dist
-                heappush(Q, (vw_dist, next(c), v, w))
-                sigma[w] = 0.0
-                P[w] = [v]
-            elif vw_dist == seen[w]:  # handle equal paths
-                sigma[w] += sigma[v]
                 P[w].append(v)
     return S, P, sigma, D
 
 
+def _single_source_dijkstra_path_basic(G, s, weight):
+    weight_func = _weight_function(G, weight)
+    S = []
+    P = {v: [] for v in G}
+    sigma = defaultdict(float)
+    D = {}
+    sigma[s] = 1.0
+    seen = {s: 0}
+    c = count()
+    Q = []
+    heappush(Q, (0, next(c), s, s))
+    G_adj = G._adj if hasattr(G, "_adj") else G  # Faster than repeated attr get
+    while Q:
+        dist, _, pred, v = heappop(Q)
+        if v in D:
+            continue
+        sigma[v] += sigma[pred]
+        S.append(v)
+        D[v] = dist
+        Gv = G_adj[v]
+        for w, edgedata in Gv.items():
+            vw_dist = dist + weight_func(v, w, edgedata)
+            if w not in D:
+                if w not in seen or vw_dist < seen[w]:
+                    seen[w] = vw_dist
+                    heappush(Q, (vw_dist, next(c), v, w))
+                    sigma[w] = 0.0
+                    P[w] = [v]
+                elif vw_dist == seen[w]:
+                    sigma[w] += sigma[v]
+                    P[w].append(v)
+    return S, P, sigma, D
+
+
 def _accumulate_basic(betweenness, S, P, sigma, s):
-    delta = dict.fromkeys(S, 0)
+    delta = defaultdict(float)
+    append = S.append  # Not used but kept for possible future optimization
+    pop = S.pop
     while S:
-        w = S.pop()
-        coeff = (1 + delta[w]) / sigma[w]
+        w = pop()
+        sigw = sigma[w]
+        if sigw == 0.0:
+            continue
+        coeff = (1 + delta[w]) / sigw
         for v in P[w]:
             delta[v] += sigma[v] * coeff
         if w != s:
@@ -331,10 +336,14 @@ def _accumulate_basic(betweenness, S, P, sigma, s):
 
 def _accumulate_endpoints(betweenness, S, P, sigma, s):
     betweenness[s] += len(S) - 1
-    delta = dict.fromkeys(S, 0)
+    delta = defaultdict(float)
+    pop = S.pop
     while S:
-        w = S.pop()
-        coeff = (1 + delta[w]) / sigma[w]
+        w = pop()
+        sigw = sigma[w]
+        if sigw == 0.0:
+            continue
+        coeff = (1 + delta[w]) / sigw
         for v in P[w]:
             delta[v] += sigma[v] * coeff
         if w != s:
@@ -360,47 +369,27 @@ def _accumulate_edges(betweenness, S, P, sigma, s):
 
 
 def _rescale(betweenness, n, *, normalized, directed, k, endpoints, sampled_nodes):
-    # N is used to count the number of valid (s, t) pairs where s != t that
-    # could have a path pass through v. If endpoints is False, then v must
-    # not be the target t, hence why we subtract by 1.
     N = n if endpoints else n - 1
     if N < 2:
-        # No rescaling necessary: b=0 for all nodes
         return betweenness
 
     K_source = N if k is None else k
+    result = betweenness
 
     if k is None or endpoints:
-        # No sampling adjustment needed
         if normalized:
-            # Divide by the number of valid (s, t) node pairs that could have
-            # a path through v where s != t.
             scale = 1 / (K_source * (N - 1))
         else:
-            # Scale to the full BC
-            if not directed:
-                # The non-normalized BC values are computed the same way for
-                # directed and undirected graphs: shortest paths are computed and
-                # counted for each *ordered* (s, t) pair. Undirected graphs should
-                # only count valid *unordered* node pairs {s, t}; that is, (s, t)
-                # and (t, s) should be counted only once. We correct for this here.
-                correction = 2
-            else:
-                correction = 1
+            correction = 2 if not directed else 1
             scale = N / (K_source * correction)
+        if scale == 1:
+            return result
+        for v in result:
+            result[v] *= scale
+        return result
 
-        if scale != 1:
-            for v in betweenness:
-                betweenness[v] *= scale
-        return betweenness
-
-    # Sampling adjustment needed when excluding endpoints when using k. In this
-    # case, we need to handle source nodes differently from non-source nodes,
-    # because source nodes can't include themselves since endpoints are excluded.
-    # Without this, k == n would be a special case that would violate the
-    # assumption that node `v` is not one of the (s, t) node pairs.
+    # k set and not endpoints
     if normalized:
-        # NaN for undefined 0/0; there is no data for source node when k=1
         scale_source = 1 / ((K_source - 1) * (N - 1)) if K_source > 1 else math.nan
         scale_nonsource = 1 / (K_source * (N - 1))
     else:
@@ -408,10 +397,10 @@ def _rescale(betweenness, n, *, normalized, directed, k, endpoints, sampled_node
         scale_source = N / ((K_source - 1) * correction) if K_source > 1 else math.nan
         scale_nonsource = N / (K_source * correction)
 
-    sampled_nodes = set(sampled_nodes)
-    for v in betweenness:
-        betweenness[v] *= scale_source if v in sampled_nodes else scale_nonsource
-    return betweenness
+    sampled_node_set = set(sampled_nodes)
+    for v in result:
+        result[v] *= scale_source if v in sampled_node_set else scale_nonsource
+    return result
 
 
 def _rescale_e(betweenness, n, normalized, directed=False, k=None):
