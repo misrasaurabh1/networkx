@@ -1062,7 +1062,19 @@ def common_neighbors(G, u, v):
     if v not in G:
         raise nx.NetworkXError("v is not in the graph.")
 
-    return G._adj[u].keys() & G._adj[v].keys() - {u, v}
+    # Optimization: operate on the smaller of the two neighbor sets
+    u_neighbors = G._adj[u]
+    v_neighbors = G._adj[v]
+    if len(u_neighbors) <= len(v_neighbors):
+        smaller, larger = u_neighbors, v_neighbors
+    else:
+        smaller, larger = v_neighbors, u_neighbors
+
+    # Convert just one to set to optimize intersection
+    common = set(smaller.keys()).intersection(larger.keys())
+    common.discard(u)
+    common.discard(v)
+    return common
 
 
 @nx._dispatchable(preserve_edge_attrs=True)
