@@ -1,7 +1,7 @@
 """Betweenness centrality measures."""
 
 import math
-from collections import deque
+from collections import defaultdict, deque
 from heapq import heappop, heappush
 from itertools import count
 
@@ -260,26 +260,36 @@ def edge_betweenness_centrality(G, k=None, normalized=True, weight=None, seed=No
 
 def _single_source_shortest_path_basic(G, s):
     S = []
-    P = {}
-    for v in G:
-        P[v] = []
-    sigma = dict.fromkeys(G, 0.0)  # sigma[v]=0 for v in G
+    P = {v: [] for v in G}
+    sigma = defaultdict(float)
     D = {}
     sigma[s] = 1.0
     D[s] = 0
+    Q_append = deque.append
+    Q_popleft = deque.popleft
     Q = deque([s])
-    while Q:  # use BFS to find shortest paths
-        v = Q.popleft()
-        S.append(v)
+
+    # Use G._adj directly if available, else use the dict itself
+    G_adj = G._adj if hasattr(G, "_adj") else G
+
+    S_append = S.append
+    D_get = D.get
+    sigma_get = sigma.get
+    P_get = P.get
+
+    while Q:
+        v = Q_popleft(Q)
+        S_append(v)
         Dv = D[v]
         sigmav = sigma[v]
-        for w in G[v]:
+        Gv = G_adj[v]
+        for w in Gv:
             if w not in D:
-                Q.append(w)
+                Q_append(Q, w)
                 D[w] = Dv + 1
-            if D[w] == Dv + 1:  # this is a shortest path, count paths
+            if D[w] == Dv + 1:
                 sigma[w] += sigmav
-                P[w].append(v)  # predecessors
+                P[w].append(v)
     return S, P, sigma, D
 
 
