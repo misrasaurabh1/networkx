@@ -1,7 +1,8 @@
+import pytest
 import networkx as nx
 
 
-class ManyComponentsBenchmark:
+class TestManyComponentsBenchmark:
     """Use atlas6() as a benchmarking case to probe for performance on graphs
     with many connected components.
 
@@ -10,7 +11,7 @@ class ManyComponentsBenchmark:
     See the atlas6 gallery example for more info.
     """
 
-    def setup(self):
+    def setup_method(self):
         atlas = nx.graph_atlas_g()[
             3:209
         ]  # 0, 1, 2 => no edges. 208 is last 6 node graph
@@ -22,5 +23,5 @@ class ManyComponentsBenchmark:
                 U = nx.disjoint_union(U, G)
         self.G = U
 
-    def time_single_source_all_shortest_paths(self):
+    def test_single_source_all_shortest_paths(self):
         _ = dict(nx.single_source_all_shortest_paths(self.G, 500))
